@@ -16,7 +16,7 @@
 - 결과 및 의의
   - XGBoost 모델이 약 98%의 정확도로 가장 높은 성능을 보였으며 형태적 특성(Weight, Length)이 종 분류의 핵심 요인임을 확인하였다.
   - 본 프로젝트는 형태적 데이터만으로도 높은 수준의 종 판별이 가능함을 보여주며 생태 연구 및 보전 관리 분야에서의 데이터 기반 의사결정 지원 가능성을 제시한다.
-- [자료 다운로드](https://github.com/j11w00n/Portfolio/blob/main/Crocodile_Scientific_Name_Prediction%20(2).ipynb)
+- [자료](https://github.com/j11w00n/Portfolio/blob/main/Crocodile_Scientific_Name_Prediction%20(2).ipynb)
 
 ### 02. Vehicle 데이터를 활용한 중고차 가격 예측 및 인사이트 분석
 - 프로젝트 소개

@@ -1,7 +1,7 @@
 
 2.1 분석쿼리 A: 고객 참여도 분석
 '''sql
--- [SELECT
+-- SELECT
     P.product_name,
     PR.rating_count,
     PR.actual_price,
@@ -13,5 +13,5 @@ WHERE PR.rating_count IS NOT NULL AND PR.rating_count > 0
 -- 평점 수를 기준으로 내림차순 정렬
 ORDER BY PR.rating_count DESC
 -- 상위 5개만 추출
-LIMIT 5;]
-[쿼리 A 결과 테이블](https://github.com/j11w00n/Portfolio/blob/main/amazon_sales_data.sql/images/%EC%BF%BC%EB%A6%ACA.png)
+LIMIT 5;
+[자료다운로드](https://github.com/j11w00n/Portfolio/blob/main/amazon_sales_data.sql/images/%EC%BF%BC%EB%A6%ACA.png)

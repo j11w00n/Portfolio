@@ -14,3 +14,5 @@ WHERE PR.rating_count IS NOT NULL AND PR.rating_count > 0
 ORDER BY PR.rating_count DESC
 -- 상위 5개만 추출
 LIMIT 5;]
+**[실행테이블]**
+![쿼리 A 결과 테이블](images/쿼리A.png)

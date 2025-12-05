@@ -14,4 +14,4 @@ WHERE PR.rating_count IS NOT NULL AND PR.rating_count > 0
 ORDER BY PR.rating_count DESC
 -- 상위 5개만 추출
 LIMIT 5;
-![쿼리A 결과](https://github.com/j11w00n/Portfolio/blob/main/amazon_sales_data.sql/images/Query_A.png)
+<img scr="https://github.com/j11w00n/Portfolio/blob/main/amazon_sales_data.sql/images/Query_A.png" width="30" height="30" />

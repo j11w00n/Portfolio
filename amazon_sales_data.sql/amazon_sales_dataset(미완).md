@@ -15,7 +15,8 @@ FROM Products;
 ```
 <img width="697" height="57" alt="image" src="https://github.com/user-attachments/assets/c4dd7c70-13e3-4190-be96-523a82f7cbf5" />
 
-- Products 테이블에 총 1,351개의 상품 레코드가 있으며 모든 product_id가 고유함을 확인했다. 이는 테이블의 기본 키(Primary Key) 무결성이 확보되었음을 의미하며 이후 분석 과정에서 다른 테이블과 JOIN 작업 시 데이터 손실이나 중복 없이 신뢰할 수 있는 결합을 수행할 수 있다.
+- Products 테이블에 총 1,351개의 상품 레코드가 있으며 모든 product_id가 고유함을 확인하였다.
+- 이는 테이블의 기본 키(Primary Key) 무결성이 확보되었음을 의미하며 이후 분석 과정에서 다른 테이블과 JOIN 작업 시 데이터 손실이나 중복 없이 신뢰할 수 있는 결합을 수행할 수 있다.
 
 ### 분석쿼리 0-2
 ```sql
@@ -37,12 +38,110 @@ WHERE PR.actual_price IS NOT NULL AND PR.actual_price > 0
 ```
 <img width="508" height="57" alt="image" src="https://github.com/user-attachments/assets/36029489-5def-4e2b-aa90-3709d6f33b93" />
 
-- 상품 가격은 최저 39원에서 최고 139,900원으로 매우 넓은 범위에 걸쳐 분포하고 있으며 평균 가격은 5,691.18원이다.
+- 상품 가격은 최저 ₹39에서 최고 ₹139,900으로 매우 넓은 범위에 걸쳐 분포하고 있으며 평균 가격은 ₹5,691.18이다.
 - 평점은 0점부터 5점까지 모든 범위에 걸쳐 있으며 평균 평점은 4.09점이다.
 
 ### 분석쿼리 0-3:
+```sql
+/*
+  분석 쿼리 0-3: Users 테이블 무결성 및 기본 통계
+  - 데이터셋에 포함된 총 사용자 수 확인 및 ID 중복 여부 검증
+*/
+SELECT
+    COUNT(user_id) AS total_users_in_table,
+    COUNT(DISTINCT user_id) AS unique_user_id_count,
+    CASE
+        WHEN COUNT(user_id) = COUNT(DISTINCT user_id)
+        THEN 'SUCCESS: All IDs are Unique'
+        ELSE 'ERROR: Duplicate User IDs Found'
+    END AS integrity_check_result
+FROM Users;
+```
+<img width="572" height="57" alt="image" src="https://github.com/user-attachments/assets/6b9dcda5-912f-4fa7-a1ed-de533307b93f" />
+
+- Users 테이블에는 총 1,194명의 사용자 레코드가 있으며 모든 user_id가 고유하여 무결성이 확보되었다.
 
 ### 분석쿼리 0-4:
+```sql
+/*
+  분석 쿼리 0-4: Reviews 테이블 기본 통계
+  - 총 리뷰 수 및 리뷰 내용의 평균 길이(상세도) 계산
+*/
+SELECT
+    COUNT(review_id) AS total_reviews_recorded,
+    ROUND(AVG(LENGTH(review_content)), 0) AS average_review_length_chars
+FROM Reviews
+WHERE review_content IS NOT NULL;
+```
+<img width="451" height="58" alt="image" src="https://github.com/user-attachments/assets/f66a4cbe-368f-42f3-bee6-79a62a6e60ec" />
+
+- User 테이블과 마찬가지로 1,194개의 레코드가 있다.
+- 이는 User 한사람이 리뷰를 하나씩 작성했다는 의미를 가지는데 테이블이 데이터를 바르게 반영하고 있는지 추후 점검을 진행해 봐야한다.
+
+### 진단쿼리: raw_data 내 멀티 리뷰 사용자 존재 여부 확인
+```sql
+/*
+  진단 쿼리: raw_data 내 멀티 리뷰 사용자 존재 여부 확인
+  - 원본 데이터에서 user_id별 리뷰 작성 수를 확인
+*/
+SELECT
+    user_id,
+    COUNT(review_id) AS review_count_in_raw_data
+FROM raw_data
+WHERE review_id IS NOT NULL AND user_id IS NOT NULL
+GROUP BY user_id
+ORDER BY review_count_in_raw_data DESC
+LIMIT 10;
+```
+<img width="982" height="285" alt="image" src="https://github.com/user-attachments/assets/a7e54171-864c-47ee-a35a-d67b5a83b78e" />
+
+- raw_data에는 리뷰를 5개에서 10개까지 남긴 사용자들이 명확히 존재한다.
+- 문제는 raw_data 자체에 멀티 리뷰 사용자가 없었던 것이 아니라 raw_data에서 Reviews 테이블로 데이터를 로드하는 과정에서 멀티 리뷰 정보가 모두 손실되었다.
+
+### Review 테이블 삭제 후 재생성
+```sql
+/*
+Reviews 테이블 재생성
+*/
+DROP TABLE Reviews;
+
+CREATE TABLE Reviews (
+    review_pk_id INTEGER PRIMARY KEY AUTOINCREMENT, -- 인공 Primary Key (오류 회피용)
+    review_id TEXT, -- 원본 review_id는 일반 컬럼으로 강등
+    product_id TEXT REFERENCES Products(product_id),
+    user_id TEXT REFERENCES Users(user_id),
+    review_title TEXT,
+    review_content TEXT
+);
+
+INSERT INTO Reviews (review_id, product_id, user_id, review_title, review_content)
+SELECT
+    T1.review_id,
+    TRIM(T1.product_id) AS product_id,
+    T1.user_id,
+    T1.review_title,
+    T1.review_content
+FROM raw_data AS T1
+WHERE
+    T1.review_id IS NOT NULL
+    AND T1.user_id IS NOT NULL
+    -- 외래 키 무결성 조건만 유지
+    AND TRIM(T1.product_id) IN (SELECT product_id FROM Products)
+    AND T1.user_id IN (SELECT user_id FROM Users);
+    
+/*
+  분석 쿼리 0-4(재실행): Reviews 테이블 기본 통계
+  - 총 리뷰 수 및 리뷰 내용의 평균 길이(상세도) 계산
+*/
+SELECT
+    COUNT(review_id) AS total_reviews_recorded,
+    ROUND(AVG(LENGTH(review_content)), 0) AS average_review_length_chars
+FROM Reviews
+WHERE review_content IS NOT NULL;
+```
+<img width="447" height="58" alt="image" src="https://github.com/user-attachments/assets/a4d5ec9b-e1fb-45a7-80c2-608787c6cb13" />
+
+- 
 
 ### 분석쿼리 1:
 ```sql
@@ -87,6 +186,47 @@ LIMIT 5;
 - 전체 상품 중 USB 케이블(161개)이 2위 카테고리(스마트폰, 68개)와 비교할 때 약 2.4배 많은 상품 수를 차지하며 압도적인 비중을 가지고 있다.
 -  USB 케이블 카테고리는 가장 많은 상품을 보유하고 있어 고객 유입 및 기본적인 매출 발생의 핵심 기반 시장임을 의미한다.
 - 'Computers&Accessories'와 'Electronics' 두 분야가 시장을 주도하고 있으며 이들 카테고리에 대한 재고 및 상품 관리에 최우선 자원을 배분해야 함을 보여준다.
+
+### 분석쿼리 3: 리뷰 콘텐츠 완성도 검증
+```sql
+/*
+  분석 쿼리 3: 리뷰 콘텐츠 완성도 검증
+  - 총 리뷰 중 리뷰 내용(review_content)이 비어있지 않은 비율 확인
+*/
+SELECT
+    COUNT(review_id) AS total_reviews_recorded,
+    COUNT(review_content) AS valid_content_count,
+    ROUND(
+        CAST(COUNT(review_content) AS REAL) * 100 / COUNT(review_id), 1
+    ) AS content_completeness_rate_percent
+FROM Reviews;
+```
+<img width="656" height="60" alt="image" src="https://github.com/user-attachments/assets/913fa597-91ea-4f23-99b2-b4e7533f7905" />
+
+- 
+
+### 분석쿼리 4:
+```sql
+/*
+  분석 쿼리 4: 고객 감성(Sentiment) 분포 분석
+  - 평점(rating)을 기준으로 고객 감성을 분류하여 분포 확인
+*/
+SELECT
+    CASE
+        WHEN PR.rating >= 4.0 THEN '1. Positive (4.0~5.0)'   -- 긍정
+        WHEN PR.rating >= 3.0 AND PR.rating < 4.0 THEN '2. Neutral (3.0~3.9)' -- 중립
+        ELSE '3. Negative (0.0~2.9)' -- 부정
+    END AS sentiment_segment,
+    COUNT(P.product_id) AS total_products_in_segment
+FROM Products AS P
+JOIN Pricing AS PR ON P.product_id = PR.product_id
+WHERE PR.rating IS NOT NULL
+GROUP BY sentiment_segment
+ORDER BY sentiment_segment;
+```
+<img width="405" height="111" alt="image" src="https://github.com/user-attachments/assets/d8a66344-acb3-4932-bd6c-01be80349882" />
+
+- 
 
 ### 분석쿼리 A: 고객 참여도 분석
 ```sql
@@ -265,6 +405,10 @@ GROUP BY U.user_name
 ORDER BY total_reviews_written DESC
 LIMIT 5;
 ```
+<img width="1327" height="160" alt="image" src="https://github.com/user-attachments/assets/12d6df1d-169d-4be9-8108-fba6cf83a329" />
+
+- Top 5 리뷰어 모두 평균 평점이 4.00~4.30 사이로 전체 평균(4.09점)과 비교했을 때 매우 긍정적이거나 비슷한 수준임
+- 이들은 단순히 불만을 토로하는 고객이 아니라 적극적으로 제품 사용 경험을 공유하고 회사에 긍정적인 영향을 미치는 충성 고객임을 알 수 있음
 
 ### 분석쿼리 H:
 ```sql
@@ -312,3 +456,6 @@ GROUP BY U.user_name
 ORDER BY average_review_length_chars DESC
 LIMIT 5;
 ```
+<img width="1326" height="157" alt="image" src="https://github.com/user-attachments/assets/dc359d80-f4fe-46cf-8277-7da102c31507" />
+
+- 

@@ -1,4 +1,111 @@
-### 분석쿼리 0-1
+## Amazon Sales Dataset을 활용한 데이터 분석 프로젝트
+
+---
+### 1. 프로젝트 개요 
+#### 핵심목표: raw data로부터 Products, Pricing, Users, Reviews 테이블을 만들고 상품 시장 현황, 고객 활동성, 리뷰 상세도 등을 종합 분석
+#### 사용기술: SQL(SQLite)
+#### 사용데이터: Amazon Sales Dataset(Kaggle)
+
+### 2. 분석과정
+#### 2.1 테이블 생성 및 데이터 삽입
+```sql
+CREATE TABLE raw_data (
+    product_id TEXT, product_name TEXT, category TEXT, discounted_price TEXT,
+    actual_price TEXT, discount_percentage TEXT, rating TEXT, rating_count TEXT,
+    about_product TEXT, user_id TEXT, user_name TEXT, review_id TEXT,
+    review_title TEXT, review_content TEXT, img_link TEXT, product_link TEXT
+);
+
+-- Products 테이블 생성
+CREATE TABLE Products (
+    product_id TEXT PRIMARY KEY,
+    product_name TEXT NOT NULL,
+    category TEXT,
+    about_product TEXT
+);
+
+-- 데이터 삽입 및 정제
+INSERT INTO Products (product_id, product_name, category, about_product)
+SELECT
+    -- 1. TRIM()으로 공백 제거 후 PRIMARY KEY로 사용
+    TRIM(T1.product_id) AS product_id,
+    -- 2. 그룹 내에서 product_name의 대표값(MIN)을 선택하고, NULL이면 대체
+    COALESCE(MIN(T1.product_name), 'Unknown Product Name') AS product_name,
+    MIN(T1.category) AS category,
+    MIN(T1.about_product) AS about_product
+FROM raw_data AS T1
+WHERE
+    T1.product_id IS NOT NULL  -- PRIMARY KEY NULL 방지
+    AND T1.product_name IS NOT NULL -- NOT NULL 제약 조건 오류 방지
+-- 3. TRIM된 product_id를 기준으로 그룹화하여 중복을 해결
+GROUP BY TRIM(T1.product_id);
+
+-- Pricing 테이블 생성
+CREATE TABLE Pricing (
+    product_id TEXT PRIMARY KEY REFERENCES Products(product_id),
+    discounted_price REAL,
+    actual_price REAL,
+    discount_percentage REAL,
+    rating REAL,
+    rating_count INTEGER
+);
+
+-- Pricing 데이터 삽입
+INSERT INTO Pricing (product_id, discounted_price, actual_price, discount_percentage, rating, rating_count)
+SELECT
+    -- TRIM() 적용
+    TRIM(product_id) AS product_id,
+    CAST(REPLACE(REPLACE(discounted_price, '₹', ''), ',', '') AS REAL),
+    CAST(REPLACE(REPLACE(actual_price, '₹', ''), ',', '') AS REAL),
+    CAST(REPLACE(discount_percentage, '%', '') AS REAL),
+    CAST(rating AS REAL),
+    CAST(REPLACE(REPLACE(rating_count, ' global ratings', ''), ',', '') AS INTEGER)
+FROM raw_data
+-- TRIM된 product_id를 기준으로 그룹화
+GROUP BY TRIM(product_id)
+HAVING TRIM(product_id) IN (SELECT product_id FROM Products);
+
+-- Users 테이블 생성 및 데이터 삽입
+CREATE TABLE Users (
+    user_id TEXT PRIMARY KEY,
+    user_name TEXT -- 사용자 이름은 NULL을 허용해도 괜찮다고 가정합니다.
+);
+
+INSERT INTO Users (user_id, user_name)
+SELECT
+    DISTINCT user_id,
+    user_name
+FROM raw_data
+WHERE user_id IS NOT NULL;
+
+-- Reviews 테이블 생성 및 데이터 삽입
+CREATE TABLE Reviews (
+    review_id TEXT PRIMARY KEY,
+    product_id TEXT REFERENCES Products(product_id), -- Products 테이블 참조
+    user_id TEXT REFERENCES Users(user_id),         -- Users 테이블 참조
+    review_title TEXT,
+    review_content TEXT
+);
+
+INSERT INTO Reviews (review_id, product_id, user_id, review_title, review_content)
+SELECT
+    T1.review_id,
+    TRIM(T1.product_id) AS product_id,
+    MIN(T1.user_id) AS user_id,
+    MIN(T1.review_title) AS review_title,
+    MIN(T1.review_content) AS review_content
+FROM raw_data AS T1
+WHERE
+    T1.review_id IS NOT NULL -- Primary Key NULL 방지
+GROUP BY T1.review_id -- review_id가 같은 행은 하나로 묶음
+HAVING
+    TRIM(T1.product_id) IN (SELECT product_id FROM Products)
+    AND MIN(T1.user_id) IN (SELECT user_id FROM Users);
+```
+
+#### 2.2 테이블 무결성 및 기본 통계 분석
+---
+#### 분석쿼리 0-1
 ```sql
 /*
   분석 쿼리 0-1: 데이터 무결성 및 수량 확인
@@ -18,7 +125,7 @@ FROM Products;
 - Products 테이블에 총 1,351개의 상품 레코드가 있으며 모든 product_id가 고유함을 확인하였다.
 - 이는 테이블의 기본 키(Primary Key) 무결성이 확보되었음을 의미하며 이후 분석 과정에서 다른 테이블과 JOIN 작업 시 데이터 손실이나 중복 없이 신뢰할 수 있는 결합을 수행할 수 있다.
 
-### 분석쿼리 0-2
+#### 분석쿼리 0-2
 ```sql
 /*
   분석 쿼리 0-2: 핵심 통계량 요약
@@ -41,7 +148,7 @@ WHERE PR.actual_price IS NOT NULL AND PR.actual_price > 0
 - 상품 가격은 최저 ₹39에서 최고 ₹139,900으로 매우 넓은 범위에 걸쳐 분포하고 있으며 평균 가격은 ₹5,691.18이다.
 - 평점은 0점부터 5점까지 모든 범위에 걸쳐 있으며 평균 평점은 4.09점이다.
 
-### 분석쿼리 0-3:
+#### 분석쿼리 0-3:
 ```sql
 /*
   분석 쿼리 0-3: Users 테이블 무결성 및 기본 통계
@@ -61,7 +168,7 @@ FROM Users;
 
 - Users 테이블에는 총 1,194명의 사용자 레코드가 있으며 모든 user_id가 고유하여 무결성이 확보되었다.
 
-### 분석쿼리 0-4:
+#### 분석쿼리 0-4:
 ```sql
 /*
   분석 쿼리 0-4: Reviews 테이블 기본 통계
@@ -78,7 +185,7 @@ WHERE review_content IS NOT NULL;
 - User 테이블과 마찬가지로 1,194개의 레코드가 있다.
 - 이는 User 한사람이 리뷰를 하나씩 작성했다는 의미를 가지는데 테이블이 데이터를 바르게 반영하고 있는지 추후 점검을 진행해 봐야한다.
 
-### 진단쿼리: raw_data 내 멀티 리뷰 사용자 존재 여부 확인
+#### 진단쿼리: raw_data 내 멀티 리뷰 사용자 존재 여부 확인
 ```sql
 /*
   진단 쿼리: raw_data 내 멀티 리뷰 사용자 존재 여부 확인
@@ -98,7 +205,7 @@ LIMIT 10;
 - raw_data에는 리뷰를 5개에서 10개까지 남긴 사용자들이 명확히 존재한다.
 - 문제는 raw_data 자체에 멀티 리뷰 사용자가 없었던 것이 아니라 raw_data에서 Reviews 테이블로 데이터를 로드하는 과정에서 멀티 리뷰 정보가 모두 손실되었다.
 
-### Review 테이블 삭제 후 재생성
+#### Review 테이블 삭제 후 재생성
 ```sql
 /*
 Reviews 테이블 재생성
@@ -141,9 +248,13 @@ WHERE review_content IS NOT NULL;
 ```
 <img width="447" height="58" alt="image" src="https://github.com/user-attachments/assets/a4d5ec9b-e1fb-45a7-80c2-608787c6cb13" />
 
-- 
+- 인공 기본 키(Artificial Primary Key) 전략을 도입하여 '리뷰 테이블에 유저당 리뷰가 하나만 반영되던 치명적인 문제'를 성공적으로 해결하였다.
+- 더 이상 UNIQUE constraint failed 오류 없이 raw_data의 모든 리뷰 행이 손실 없이 Reviews 테이블에 로드되었다.
+- 이전에 User 1명당 1개로만 집계되었던 total_reviews_written이 실제 값(10개, 8개 등)으로 복원되어 파워 리뷰어(고가치 고객) 데이터가 성공적으로 확보되었다.
 
-### 분석쿼리 1:
+#### 2.2 기본 분석
+---
+#### 분석쿼리 1:
 ```sql
 /*
   분석 쿼리 1: 데이터 완성도 검증 (NULL 값 존재 여부 확인)
@@ -167,7 +278,7 @@ LIMIT 1;
 
 - 분석의 핵심 지표인 평점(rating)과 할인율(discount\_percentage)을 대상으로 검증을 수행한 결과 두 컬럼 모두 NULL 값이 0개임을 확인하였다.
 
-### 분석쿼리 2:
+#### 분석쿼리 2:
 ```sql
 /*
   분석 쿼리 2: 상품 카테고리 분포 분석
@@ -187,25 +298,33 @@ LIMIT 5;
 -  USB 케이블 카테고리는 가장 많은 상품을 보유하고 있어 고객 유입 및 기본적인 매출 발생의 핵심 기반 시장임을 의미한다.
 - 'Computers&Accessories'와 'Electronics' 두 분야가 시장을 주도하고 있으며 이들 카테고리에 대한 재고 및 상품 관리에 최우선 자원을 배분해야 함을 보여준다.
 
-### 분석쿼리 3: 리뷰 콘텐츠 완성도 검증
+#### 분석쿼리 3: 리뷰 콘텐츠 완성도 검증
 ```sql
 /*
-  분석 쿼리 3: 리뷰 콘텐츠 완성도 검증
-  - 총 리뷰 중 리뷰 내용(review_content)이 비어있지 않은 비율 확인
+  분석 쿼리 3: 리뷰 작성 횟수 분석
+  - 가장 많은 사용자 그룹의 리뷰 작성 횟수 확인
 */
 SELECT
-    COUNT(review_id) AS total_reviews_recorded,
-    COUNT(review_content) AS valid_content_count,
-    ROUND(
-        CAST(COUNT(review_content) AS REAL) * 100 / COUNT(review_id), 1
-    ) AS content_completeness_rate_percent
-FROM Reviews;
+    COUNT(T1.user_id) AS users_in_group,
+    T1.reviews_written
+FROM (
+    SELECT
+        user_id,
+        COUNT(review_pk_id) AS reviews_written
+    FROM Reviews
+    GROUP BY user_id
+) AS T1
+GROUP BY T1.reviews_written
+ORDER BY users_in_group DESC
+LIMIT 10;
 ```
-<img width="656" height="60" alt="image" src="https://github.com/user-attachments/assets/913fa597-91ea-4f23-99b2-b4e7533f7905" />
+<img width="290" height="256" alt="image" src="https://github.com/user-attachments/assets/4b44fad4-de1b-4ba4-aaeb-2eb034783416" />
 
-- 
+- 대부분의 사용자(1050명)가 단 1개의 리뷰만 작성하였다. 이는 리뷰 데이터에서 흔히 발견되는 현상으로 고객 활동성이 '파레토 분포(Pareto Distribution)'를 따르는 것을 보여준다.
+- 전체 고객의 약 80~90%는 리뷰를 한 번만 쓰고 더 이상 참여하지 않는 'Low Engagement' 그룹이다.
+- 리뷰를 5개 이상 작성한 사용자는 단 14명이다.
 
-### 분석쿼리 4:
+#### 분석쿼리 4:
 ```sql
 /*
   분석 쿼리 4: 고객 감성(Sentiment) 분포 분석
@@ -226,9 +345,13 @@ ORDER BY sentiment_segment;
 ```
 <img width="405" height="111" alt="image" src="https://github.com/user-attachments/assets/d8a66344-acb3-4932-bd6c-01be80349882" />
 
-- 
+- 전체 리뷰 중 74.8%가 긍정 평점(4.0점 이상)으로 고객 만족도가 매우 높고 브랜드 건강(Brand Health)이 강력함을 보여준다.
+- 부정 평점(0.0~2.9점)은 전체의 0.5%인 7건에 불과하다. 이는 일반적인 환경에서 매우 낮은 수치이며 고객 불만으로 인한 대외적인 위험은 거의 없다고 판단된다.
+- 중립 평점(3.0~3.9점)은 334건(24.7%)으로 이들이 가장 중요한 전략적 타깃이 될 수 있다. 이들은 제품에 완전히 만족하지는 못했지만 결함이나 큰 불만도 없는 경계선 고객으로 이들의 리뷰 내용을 분석하여 가장 흔한 불만 사항을 식별하고 이를 개선하면 가장 적은 노력으로 긍정 그룹(4.0점 이상)으로 전환시킬 수 있는 가장 효율적인 마케팅/CS 대상이 될 수 있다.
 
-### 분석쿼리 A: 고객 참여도 분석
+#### 2.3 심층 분석
+---
+#### 분석쿼리 A: 고객 참여도 분석
 ```sql
 /*
   분석 쿼리 A: 고객 참여도 분석 - 가장 많이 리뷰된 상품 Top 5
@@ -254,7 +377,7 @@ LIMIT 5;
 - Top5를 낮은 가격대와 필수적인 소비재인 USB 케이블과 이어폰이 차지했다.
 - 이 상품들은 actual_price가 저렴하거나(케이블: ₹475~₹1,400) 할인율이 매우 높다(이어폰: 62%~65%). 이는 '저가 소모품' 또는 '필수 액세서리'를 통해 고객을 유인하는 효율적인 유입 채널 역할을 수행하고 있음을 의미한다.
 
-  ### 분석쿼리 B: 가격대 분석
+  #### 분석쿼리 B: 가격대 분석
 ```sql
 /*
   분석 쿼리 B: 가격대 분석 - 가장 비싼 상품 Top 3
@@ -277,7 +400,7 @@ LIMIT 3;
 - 모든 제품은 Electronics > Home Theater, TV & Video > Televisions > Smart Televisions 카테고리에 속한다.
 - 제시된 데이터는 TV 시장의 가격 다변화 전략을 보여준다. Sony는 가장 높은 가격과 할인율로 고가 시장의 소비자들을 타겟하며 VU와 LG는 더 저렴한 가격대에서 가성비 또는 중간급 성능을 원하는 소비자들을 놓고 경쟁한다. 특히 인치 수가 작은 LG 제품이 65인치인 VU 제품과 가격대가 비슷하다는 점은 LG의 브랜드 가치나 특정 기능이 가격을 지지하고 있음을 나타낼 수 있다.
 
-### 분석쿼리 C: 카테고리 내 우수 상품 식별
+#### 분석쿼리 C: 카테고리 내 우수 상품 식별
 ```sql
 /*
   분석 쿼리 C: 카테고리 내 우수 상품 식별
@@ -311,7 +434,7 @@ ORDER BY P.category, individual_rating DESC;
 - 식별된 상품들은 회사가 가장 우선적으로 투자해야 할 대상이 될 것이다. 이들은 이미 고객 기대치를 능가하고 있으므로 광고 예산을 이 상품에 집중하여 평점 우위를 시장 점유율 우위로 전환할 수 있다.
 - category_average_rating 컬럼은 각 카테고리의 고객 기대치 기준선을 명확히 보여준다. 이 평균 평점을 최소 목표치로 설정하고 평균과의 격차를 줄이기 위한 개선 작업을 진행해야 한다.
 
-### 분석쿼리 D:
+#### 분석쿼리 D:
 ```sql
 /*
   분석 쿼리 D: 할인 효율성 분석
@@ -334,7 +457,7 @@ LIMIT 5;
 - 'Choppers' 카테고리는 60%의 할인율로 27만 건이 넘는 압도적인 평균 평점 수(고객 참여도)를 기록했다. 이는 할인율 대비 고객 반응이 가장 폭발적인 '할인 효율성 최우수' 카테고리임을 의미한다.
 - 'BluetoothAdapters'는 33%라는 상대적으로 낮은 할인율로도 9만 5천 건의 높은 고객 반응을 유도하였다. 이 카테고리는 적은 비용으로 고객 유입을 이끌어내는 가장 효율적인 할인 전략을 가진 영역이라고 볼 수 있다.
 
-### 분석쿼리 E:
+#### 분석쿼리 E:
 ```sql
 /*
   분석 쿼리 E: 고객 만족도 위험 분석
@@ -358,7 +481,7 @@ LIMIT 5;
 - 팬 히터와 전기 히터가 나란히 하위 5위권에 포진하였다(3.81점, 3.89점). 이는 계절적 요인 또는 제품 안전성 및 성능에 대한 고객 불만이 높을 가능성이 있음을 보여주며 제품 품질 관리(QC)의 긴급한 점검이 필요함을 알려준다.
 - 인이어 헤드폰은 쿼리 D에서 상품 수가 많은 경쟁 포화 영역으로 진단되었는데 쿼리 E에서는 평점도 하위권(3.89점)으로 나타났다. 이는 경쟁이 치열함에도 불구하고 품질이나 AS에서 고객을 만족시키지 못하고 있다는 것을 의미한다.
 
-### 분석쿼리 F:
+#### 분석쿼리 F:
 ```sql
 /*
   분석 쿼리 F: 가격 구간 세분화 분석
@@ -385,7 +508,7 @@ ORDER BY price_segment;
 - 분석 대상 카테고리(Home&Kitchen) 내 상품이 중가(₹1,000 ~ ₹3,000, 182개)와 고가(Over ₹3,000, 163개) 영역에 가장 많이 집중되어 있다.
 - 저가 상품(103개)보다 중가 및 고가 상품 수가 더 많은 것으로 보아 이는 단순한 저가 경쟁 시장이 아니라 기능과 품질에 따른 가격 프리미엄이 형성된 성숙한 시장임을 시사한다.
 
-### 분석쿼리 G:
+#### 분석쿼리 G:
 ```sql
 /*
   분석 쿼리 G: 고가치 고객 세분화
@@ -410,7 +533,7 @@ LIMIT 5;
 - Top 5 리뷰어 모두 평균 평점이 4.00~4.30 사이로 전체 평균(4.09점)과 비교했을 때 매우 긍정적이거나 비슷한 수준임
 - 이들은 단순히 불만을 토로하는 고객이 아니라 적극적으로 제품 사용 경험을 공유하고 회사에 긍정적인 영향을 미치는 충성 고객임을 알 수 있음
 
-### 분석쿼리 H:
+#### 분석쿼리 H:
 ```sql
 /*
   분석 쿼리 H: 평점-리뷰 볼륨 불일치 분석
@@ -432,11 +555,11 @@ LIMIT 5;
 ```
 <img width="1281" height="153" alt="image" src="https://github.com/user-attachments/assets/ce064233-b8c3-42a0-8567-5f5793f0cf4d" />
 
-- 5개 상품 모두 평균 평점 3.3~3.4점으로 전체 평균(4.09점)보다 현저히 낮고 리뷰 수(5,692~12,185건)가 높아 대규모 고객 불만이 이미 시장에 노출되어 있음을 보여준다.
+- 5개 상품 모두 평균 평점 3.3~3.4점으로 전체 평균(4.09점)보다 현저히 낮고 리뷰 수(5,692 ~ 12,185건)가 높아 대규모 고객 불만이 이미 시장에 노출되어 있음을 보여준다.
 - 특히 Canon PIXMA 프린터는 12,185건이라는 가장 많은 부정적 피드백을 축적하고 있어 가장 시급한 품질 관리 대상이다. 이 상품들은 판매가 지속될수록 브랜드 신뢰도에 치명적인 손상을 입힐 수 있다.
 - avg_review_length_chars 값이 높게 나왔는데 이는 고객들이 단순히 낮은 평점을 주는 것을 넘어 상세하고 구체적인 이유를 리뷰에 작성하고 있음을 시사한다. 이 리뷰들은 제품 개발팀이 결함을 파악할 수 있는 고가치 데이터이다.
 
-### 분석쿼리 I:
+#### 분석쿼리 I:
 ```sql
 /*
   분석 쿼리 I: 리뷰 상세도 분석
@@ -458,4 +581,10 @@ LIMIT 5;
 ```
 <img width="1326" height="157" alt="image" src="https://github.com/user-attachments/assets/dc359d80-f4fe-46cf-8277-7da102c31507" />
 
-- 
+- 리뷰 길이 Top 5의 리뷰는 SEO 효과와 고객 체류 시간을 극대화하는 '가이드북' 수준의 콘텐츠를 제공하였다.
+- 특히 5번쨰 리뷰어는 압도적인 길이의 리뷰를 2회 이상 작성했는데 이는 일회성 리뷰가 아닌 분석적인 습관을 가진 핵심 인플루언서임을 의미한다.
+- 리뷰 수(총 활동량)와 리뷰 길이(상세도)가 항상 일치하지 않으며 고객의 가치를 판단할 때 단순한 리뷰 횟수(양)뿐만 아니라 평균 리뷰 길이(질)를 함께 고려하여 '고관여 기여자'를 정확히 정의해야 한다.
+- Top 5 중 4명이 Electronics 및 Computers 카테고리에 집중되었는데 이는 기술 제품군에서 상세한 스펙 분석 및 기술적 피드백을 얻을 수 있는 주요 창구로 볼 수 있다.
+- 1위가 Home&Kitchen에서 나왔다는 것은 생활 제품군에서도 사용 편의성, 내구성, 활용성 등에 대한 깊이 있는 피드백이 존재함을 의미하며 이 리뷰는 상품 기획(MD)팀에게 해당 카테고리의 실제 고객 니즈를 파악하는 데 결정적인 단서를 제공할 수 있다.
+
+### 3. 결론 및 발전 가능성

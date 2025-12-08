@@ -673,4 +673,4 @@ LIMIT 5;
     - 리뷰 길이·감성 점수·평점의 관계
     - 브랜드별 시장 포지션 그래프
 
-[코드다운로드](https://github.com/j11w00n/Portfolio/blob/main/amazon_sales_data.sql/amazon_sales_dataset.sql)
+- [코드다운로드](https://github.com/j11w00n/Portfolio/blob/main/amazon_sales_data.sql/amazon_sales_dataset.sql)
